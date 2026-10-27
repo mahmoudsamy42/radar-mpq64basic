@@ -16,7 +16,7 @@ st.set_page_config(
 
 # --- ترويسة التطبيق ---
 st.markdown("<h1 style='text-align: center; color: #f1f2f6;'>قـوات الـدفاع الـجوي</h1>", unsafe_allow_html=True)
-st.markdown("<h3 style='text-align: center; color: #ffa502; font-style: italic;'>إهداء النقيب محمود سامي للشابرال</h3>", unsafe_allow_html=True)
+st.markdown("<h3 style='text-align: center; color: #ffa502; font-style: italic;'>إعداد نقيب/محمود سامي للشابرال</h3>", unsafe_allow_html=True)
 st.markdown("---")
 
 # --- ملف السجل الخارجي ---
