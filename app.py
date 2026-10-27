@@ -1,5 +1,4 @@
-
-[10/27/2026 5:07 PM] Mahmoud Samy: import streamlit as st
+import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import requests
@@ -26,7 +25,6 @@ LOG_FILE = "radar_locations_log.csv"
 # --- لوحة التحكم وإدخال البيانات ---
 st.sidebar.header("⚙️ إعدادات الموقع والرادار")
 
-# قراءة المواقع المحفوظة مسبقاً لعرضها في القائمة الجانبية
 saved_options = ["موقع جديد (يدوي)"]
 if os.path.exists(LOG_FILE):
     try:
@@ -39,7 +37,6 @@ if os.path.exists(LOG_FILE):
 
 selected_saved = st.sidebar.selectbox("📂 استرجاع موقع محفوظ:", saved_options)
 
-# تحديد القيم الافتراضية أو المسترجعة
 default_lat, default_lon, default_radar_alt, default_target_alt = 29.9668, 32.5498, 10.0, 100.0
 
 if selected_saved != "موقع جديد (يدوي)":
@@ -54,13 +51,11 @@ if selected_saved != "موقع جديد (يدوي)":
     except Exception:
         pass
 
-# حقول الإدخال في الشريط الجانبي
 lat = st.sidebar.number_input("خط العرض (Lat)", value=default_lat, format="%.4f")
 lon = st.sidebar.number_input("خط الطول (Lon)", value=default_lon, format="%.4f")
 radar_alt = st.sidebar.number_input("ارتفاع الرادار (م)", value=default_radar_alt, format="%.1f")
 target_alt = st.sidebar.number_input("ارتفاع الهدف (م)", value=default_target_alt, format="%.1f")
 
-# زر الحفظ في السجل
 if st.sidebar.button("💾 حفظ الموقع بالسجل"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     file_exists = os.path.exists(LOG_FILE)
@@ -75,7 +70,6 @@ if st.sidebar.button("💾 حفظ الموقع بالسجل"):
     
     st.sidebar.success("تم حفظ الموقع بنجاح!")
 
-# --- دوال الحسابات الجغرافية والـ API ---
 def get_destination_coordinate(lat, lon, distance_km, azimuth_deg):
     R = 6371.0 
     lat_rad = math.radians(lat)
@@ -92,7 +86,8 @@ def fetch_elevation_profile(center_lat, center_lon, current_radar_alt):
     azimuths = np.linspace(0, 359, 360)
     max_ranges = np.ones(360) * 40.0
     masked_sectors = np.zeros(360, dtype=bool)
-[10/27/2026 5:07 PM] Mahmoud Samy: with st.spinner('⏳ جاري استعلام التضاريس وتحليل زوايا الحجب عبر الـ API...'):
+
+    with st.spinner('⏳ جاري استعلام التضاريس وتحليل زوايا الحجب عبر الـ API...'):
         try:
             for az in range(0, 360, 5):
                 for dist in [10, 20, 30]:
@@ -117,7 +112,6 @@ def fetch_elevation_profile(center_lat, center_lon, current_radar_alt):
 
     return np.radians(azimuths), max_ranges, masked_sectors
 
-# --- زر التشغيل الرئيسي ---
 if st.button("🚀 بدء تحليل تضاريس الموقع ورسم غلاف الكشف", use_container_width=True):
     azimuths, max_ranges, masked_sectors = fetch_elevation_profile(lat, lon, radar_alt)
 
@@ -125,12 +119,12 @@ if st.button("🚀 بدء تحليل تضاريس الموقع ورسم غلاف
     fig.patch.set_facecolor('#1e272e')
     ax.set_facecolor('#0f171e')
 
-    ax.plot(azimuths, max_ranges, color='#00d2d3', linewidth=2.5, label='غلاف الكشف الفعلي')
+    ax.plot(azimuths, max_ranges, color='#00d2d3', linewidth=2.5, label='Radar Coverage')
     ax.fill(azimuths, max_ranges, color='#00d2d3', alpha=0.25)
 
     shadow_indices = np.where(masked_sectors)[0]
     if len(shadow_indices) > 0:
-        ax.fill_between(azimuths, 0, np.where(masked_sectors, max_ranges, 0), color='#ff4757', alpha=0.4, label='منطقة الظل التضاريسي (حجب)')
+        ax.fill_between(azimuths, 0, np.where(masked_sectors, max_ranges, 0), color='#ff4757', alpha=0.4, label='Terrain Masking')
 
     ax.set_theta_zero_location('N')
     ax.set_theta_direction(-1)
