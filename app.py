@@ -17,7 +17,7 @@ st.set_page_config(
 # --- ترويسة التطبيق الاحترافية ---
 st.markdown("<h2 style='text-align: center; color: #f1f2f6; margin-bottom: 0px;'>AN/MPQ-64 Radar Plotter</h2>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #718093; font-size: 13px;'>1cm = 2km Scale | Envelope & Tactical Terrain Simulator</p>", unsafe_allow_html=True)
-st.markdown("<h4 style='text-align: center; color: #ffa502; font-style: italic; margin-top: 5px;'>قوات الدفاع الجوي - إهداء النقيب محمود سامي</h4>", unsafe_allow_html=True)
+st.markdown("<h4 style='text-align: center; color: #ffa502; font-style: italic; margin-top: 5px;'>قوات الدفاع الجوي - تصميم النقيب محمود سامي</h4>", unsafe_allow_html=True)
 st.markdown("---")
 
 LOG_FILE = "radar_locations_log.csv"
