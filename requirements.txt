@@ -3,3 +3,5 @@ numpy
 matplotlib
 requests
 pandas
+folium
+streamlit-folium
