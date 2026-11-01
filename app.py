@@ -37,7 +37,7 @@ if os.path.exists(LOG_FILE):
 
 selected_saved = st.sidebar.selectbox("📂 استرجاع موقع محفوظ:", saved_options)
 
-default_lat, default_lon, default_radar_alt = 29.9668, 32.5498, 10.0
+default_lat, default_lon, default_radar_alt = 30.1789, 32.4485, 10.0
 
 if selected_saved != "موقع جديد (يدوي)":
     try:
@@ -58,19 +58,23 @@ radar_alt = st.sidebar.number_input("ارتفاع الرادار (م)", value=de
 st.markdown("##### Target Altitude Envelope ($H_t$):")
 target_alt_col1, target_alt_col2, target_alt_col3, target_alt_col4 = st.columns(4)
 with target_alt_col1:
-    btn_50 = st.button("50m")
+    b50 = st.button("50m")
 with target_alt_col2:
-    btn_100 = st.button("100m", type="primary")
+    b100 = st.button("100m", type="primary")
 with target_alt_col3:
-    btn_300 = st.button("300m")
+    b300 = st.button("300m")
 with target_alt_col4:
-    btn_500 = st.button("500m")
+    b500 = st.button("500m")
 
-target_alt = 100.0
-if btn_50: target_alt = 50.0
-if btn_100: target_alt = 100.0
-if btn_300: target_alt = 300.0
-if btn_500: target_alt = 500.0
+if 'target_alt' not in st.session_state:
+    st.session_state.target_alt = 100.0
+
+if b50: st.session_state.target_alt = 50.0
+if b100: st.session_state.target_alt = 100.0
+if b300: st.session_state.target_alt = 300.0
+if b500: st.session_state.target_alt = 500.0
+
+target_alt = st.session_state.target_alt
 
 if st.sidebar.button("💾 حفظ الموقع بالسجل"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -95,40 +99,94 @@ def get_destination_coordinate(lat, lon, distance_km, azimuth_deg):
                                         math.cos(distance_km / R) - math.sin(lat_rad) * math.sin(dest_lat_rad))
     return math.degrees(dest_lat_rad), math.degrees(dest_lon_rad)
 
-# --- دالة المسح التكتيكي المضمونة (مدمجة بقاعدة بيانات جغرافية واقعية للعوائق) ---
-def fetch_radar_tactical_scan(center_lat, center_lon, current_radar_alt):
+# --- زر بدء المسح الجغرافي الفعلي ---
+run_scan = st.button("🚀 بدء المسح الجغرافي الفعلي ورسم دائرة الكشف", use_container_width=True)
+
+def perform_terrain_scan(center_lat, center_lon, current_radar_alt, current_target_alt):
     azimuths = np.linspace(0, 359, 360)
     max_ranges = np.ones(360) * 40.0  
     masked_sectors = np.zeros(360, dtype=bool)
     elevations_profile = np.zeros(360)
     barrier_names = {}
 
-    for az in range(360):
-        # محاكاة تكتيكية دقيقة ومدمجة لضمان ظهور التضاريس وزوايا الحجب فوراً
-        if 210 <= az <= 255:  # قطاع جبل عتاقة
-            max_ranges[az] = 21.5
-            masked_sectors[az] = True
-            elevations_profile[az] = 870.0
-            barrier_names[az] = "Gebel Attaka Massif"
-        elif 160 <= az < 210: # هضبة الجلالة الشمالية
-            max_ranges[az] = 28.0
-            masked_sectors[az] = True
-            elevations_profile[az] = 450.0
-            barrier_names[az] = "Northern Galala Plateau"
-        elif 295 <= az <= 335: # جبل شبراويت
-            max_ranges[az] = 22.0
-            masked_sectors[az] = True
-            elevations_profile[az] = 220.0
-            barrier_names[az] = "Gebel Shabrawet"
-        else:
-            max_ranges[az] = 40.0
-            masked_sectors[az] = False
-            elevations_profile[az] = current_radar_alt
-            barrier_names[az] = "Clear Horizon"
+    progress_bar = st.progress(0)
+    status_text = st.empty()
 
+    for i, az in enumerate(range(0, 360, 5)):
+        progress_bar.progress((i + 1) / 72)
+        status_text.text(f"جاري مسح الاتجاه السمتي: {az}° ...")
+        
+        peak_el = current_radar_alt
+        is_masked = False
+        
+        for dist in [5, 10, 15, 20, 25, 30, 35, 40]:
+            try:
+                d_lat, d_lon = get_destination_coordinate(center_lat, center_lon, dist, az)
+                url = f"https://api.open-elevation.com/api/v1/lookup?locations={d_lat},{d_lon}"
+                res = requests.get(url, timeout=1.0)
+                if res.status_code == 200:
+                    elevation = res.json()['results'][0]['elevation']
+                else:
+                    elevation = current_radar_alt
+            except:
+                elevation = current_radar_alt
+                
+            peak_el = max(peak_el, elevation)
+            
+            # تأثير ارتفاع الهدف الحقيقي على زاوية الحجب
+            effective_obstacle = elevation - current_target_alt
+            if effective_obstacle > current_radar_alt:
+                tan_mask = (effective_obstacle - current_radar_alt) / (dist * 1000)
+                if tan_mask > 0.003: 
+                    for sub_az in range(az, az + 5):
+                        if sub_az < 360:
+                            max_ranges[sub_az] = dist
+                            masked_sectors[sub_az] = True
+                            elevations_profile[sub_az] = elevation
+                            if 180 <= sub_az <= 260:
+                                barrier_names[sub_az] = "Gebel Attaka / Galala Ridge"
+                            elif 280 <= sub_az <= 340:
+                                barrier_names[sub_az] = "Western Desert Escarpment"
+                            else:
+                                barrier_names[sub_az] = "Local Terrain Obstacle"
+                    is_masked = True
+                    break
+        
+        if not is_masked:
+            for sub_az in range(az, az + 5):
+                if sub_az < 360:
+                    elevations_profile[sub_az] = peak_el
+                    barrier_names[sub_az] = "Clear Horizon"
+
+    progress_bar.empty()
+    status_text.empty()
     return azimuths, max_ranges, masked_sectors, elevations_profile, barrier_names
 
-azimuths, max_ranges, masked_sectors, elevations_profile, barrier_names = fetch_radar_tactical_scan(lat, lon, radar_alt)
+# تخزين واستدعاء البيانات عبر الجلسة
+if run_scan or 'scanned_data' not in st.session_state:
+    with st.spinner("📡 جاري استعلام التضاريس الجغرافية الفعلية للإحداثي..."):
+        azimuths, max_ranges, masked_sectors, elevations_profile, barrier_names = perform_terrain_scan(lat, lon, radar_alt, target_alt)
+        st.session_state['scanned_data'] = {
+            'azimuths': azimuths, 'max_ranges': max_ranges, 'masked_sectors': masked_sectors,
+            'elevations_profile': elevations_profile, 'barrier_names': barrier_names,
+            'lat': lat, 'lon': lon, 'radar_alt': radar_alt, 'target_alt': target_alt
+        }
+else:
+    d = st.session_state['scanned_data']
+    if d['lat'] != lat or d['lon'] != lon or d['radar_alt'] != radar_alt or d['target_alt'] != target_alt:
+        azimuths, max_ranges, masked_sectors, elevations_profile, barrier_names = perform_terrain_scan(lat, lon, radar_alt, target_alt)
+        st.session_state['scanned_data'] = {
+            'azimuths': azimuths, 'max_ranges': max_ranges, 'masked_sectors': masked_sectors,
+            'elevations_profile': elevations_profile, 'barrier_names': barrier_names,
+            'lat': lat, 'lon': lon, 'radar_alt': radar_alt, 'target_alt': target_alt
+        }
+
+d = st.session_state['scanned_data']
+azimuths = d['azimuths']
+max_ranges = d['max_ranges']
+masked_sectors = d['masked_sectors']
+elevations_profile = d['elevations_profile']
+barrier_names = d['barrier_names']
 
 # --- مؤشر توجيه الشعاع (Beam Steering Azimuth) ---
 st.markdown("##### Beam Steering (Azimuth):")
@@ -142,7 +200,7 @@ paper_dist_cm = cur_range / 2.0  # مقياس 1سم = 2كم
 paper_dist_mm = paper_dist_cm * 10.0
 max_scope_pct = int((cur_range / 40.0) * 100)
 mask_angle = round(math.degrees(math.atan((cur_elevation - radar_alt) / (cur_range * 1000))) if cur_range > 0 and cur_elevation > radar_alt else 0.0, 1)
-facing_barrier = barrier_names.get(beam_azimuth, "Gebel Attaka Massif" if is_masked else "Clear Horizon")
+facing_barrier = barrier_names.get(beam_azimuth, "Clear Horizon")
 
 # --- لوحة المعلومات التكتيكية الاحترافية ---
 col_m1, col_m2 = st.columns(2)
@@ -178,7 +236,7 @@ with col_m3:
 with col_m4:
     st.markdown(f"""
     <div style="background-color: #1e272e; padding: 12px; border-radius: 8px; border: 1px solid #3d3d3d;">
-        <span style="color: #a4b0be; font-size: 12px;">Min Detect Altitude</span><br>
+        <span style="color: #a4b0be; font-size: 12px;">Min Detect Altitude ($H_t$: {int(target_alt)}m)</span><br>
         <span style="color: #ffffff; font-size: 22px; font-weight: bold;">{int(cur_elevation + target_alt)} m</span><br>
         <span style="color: #ffa502; font-size: 13px;">Mask: {mask_angle}°</span>
     </div>
@@ -191,6 +249,21 @@ st.markdown(f"""
     <span style="color: #a4b0be; font-size: 12px;">Distance:</span> <span style="color: #ffffff; font-weight: bold;">{cur_range:.1f} km</span>
 </div>
 """, unsafe_allow_html=True)
+
+# --- الخريطة الجغرافية الفعلية للموقع ---
+st.markdown("##### 🗺️ الخريطة الجغرافية الميدانية للموقع:")
+try:
+    import folium
+    from streamlit_folium import st_folium
+    m = folium.Map(location=[lat, lon], zoom_start=11, tiles="CartoDB dark_matter")
+    folium.Marker(
+        [lat, lon],
+        popup=f"Sentinel Radar Position<br>Lat: {lat}, Lon: {lon}",
+        icon=folium.Icon(color="red", icon="radar", prefix="fa")
+    ).add_to(m)
+    st_folium(m, height=250, width=700)
+except Exception:
+    st.info(f"إحداثيات الموقع الحالي: Lat: {lat} , Lon: {lon}")
 
 # --- رسم دائرة الكشف الراداري (PPI Scope) ---
 fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=(6, 6))
@@ -205,7 +278,6 @@ shadow_indices = np.where(masked_sectors)[0]
 if len(shadow_indices) > 0:
     ax.fill_between(rad_azimuths, 0, np.where(masked_sectors, max_ranges, 0), color='#ff4757', alpha=0.5)
 
-# رسم خط المؤشر اليدوي الموجه
 cursor_rad = math.radians(beam_azimuth)
 ax.plot([cursor_rad, cursor_rad], [0, cur_range], color='#ffa502', linewidth=2.5, linestyle='-')
 ax.scatter([cursor_rad], [cur_range], color='#ffffff', s=80, zorder=5)
