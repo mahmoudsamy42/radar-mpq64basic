@@ -109,13 +109,7 @@ def perform_terrain_scan(center_lat, center_lon, current_radar_alt, current_targ
     elevations_profile = np.zeros(360)
     barrier_names = {}
 
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    for i, az in enumerate(range(0, 360, 5)):
-        progress_bar.progress((i + 1) / 72)
-        status_text.text(f"جاري مسح الاتجاه السمتي: {az}° ...")
-        
+    for az in range(0, 360, 5):
         peak_el = current_radar_alt
         is_masked = False
         
@@ -123,7 +117,7 @@ def perform_terrain_scan(center_lat, center_lon, current_radar_alt, current_targ
             try:
                 d_lat, d_lon = get_destination_coordinate(center_lat, center_lon, dist, az)
                 url = f"https://api.open-elevation.com/api/v1/lookup?locations={d_lat},{d_lon}"
-                res = requests.get(url, timeout=1.0)
+                res = requests.get(url, timeout=0.8)
                 if res.status_code == 200:
                     elevation = res.json()['results'][0]['elevation']
                 else:
@@ -133,7 +127,6 @@ def perform_terrain_scan(center_lat, center_lon, current_radar_alt, current_targ
                 
             peak_el = max(peak_el, elevation)
             
-            # تأثير ارتفاع الهدف الحقيقي على زاوية الحجب
             effective_obstacle = elevation - current_target_alt
             if effective_obstacle > current_radar_alt:
                 tan_mask = (effective_obstacle - current_radar_alt) / (dist * 1000)
@@ -158,11 +151,8 @@ def perform_terrain_scan(center_lat, center_lon, current_radar_alt, current_targ
                     elevations_profile[sub_az] = peak_el
                     barrier_names[sub_az] = "Clear Horizon"
 
-    progress_bar.empty()
-    status_text.empty()
     return azimuths, max_ranges, masked_sectors, elevations_profile, barrier_names
 
-# تخزين واستدعاء البيانات عبر الجلسة
 if run_scan or 'scanned_data' not in st.session_state:
     with st.spinner("📡 جاري استعلام التضاريس الجغرافية الفعلية للإحداثي..."):
         azimuths, max_ranges, masked_sectors, elevations_profile, barrier_names = perform_terrain_scan(lat, lon, radar_alt, target_alt)
@@ -196,7 +186,7 @@ beam_mils = int(beam_azimuth * (6400 / 360))
 cur_range = max_ranges[beam_azimuth]
 cur_elevation = elevations_profile[beam_azimuth]
 is_masked = masked_sectors[beam_azimuth]
-paper_dist_cm = cur_range / 2.0  # مقياس 1سم = 2كم
+paper_dist_cm = cur_range / 2.0  
 paper_dist_mm = paper_dist_cm * 10.0
 max_scope_pct = int((cur_range / 40.0) * 100)
 mask_angle = round(math.degrees(math.atan((cur_elevation - radar_alt) / (cur_range * 1000))) if cur_range > 0 and cur_elevation > radar_alt else 0.0, 1)
@@ -250,44 +240,46 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- الخريطة الجغرافية الفعلية للموقع ---
-st.markdown("##### 🗺️ الخريطة الجغرافية الميدانية للموقع:")
+# --- جلب صورة الخريطة الجغرافية الحقيقية كخلفية شفافة للدائرة ---
+st.markdown("##### 🗺️ شاشة المظاهرة الرادارية فوق الخلفية الطبوغرافية للمكان:")
 try:
-    import folium
-    from streamlit_folium import st_folium
-    m = folium.Map(location=[lat, lon], zoom_start=11, tiles="CartoDB dark_matter")
-    folium.Marker(
-        [lat, lon],
-        popup=f"Sentinel Radar Position<br>Lat: {lat}, Lon: {lon}",
-        icon=folium.Icon(color="red", icon="radar", prefix="fa")
-    ).add_to(m)
-    st_folium(m, height=250, width=700)
-except Exception:
-    st.info(f"إحداثيات الموقع الحالي: Lat: {lat} , Lon: {lon}")
+    from PIL import Image
+    import io
+    # جلب بلاطة خريطة طبوغرافية مظلمة لتعمل كخلفية حقيقية للموقع
+    map_url = f"https://a.basemaps.cartocdn.com/dark_all/10/{int((lon + 180) / 360 * 2**10)}/{int((1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * 2**10)}.png"
+    map_res = requests.get(map_url, timeout=2.0)
+    bg_img = Image.open(io.BytesIO(map_res.content)).convert("RGBA") if map_res.status_code == 200 else None
+except:
+    bg_img = None
 
-# --- رسم دائرة الكشف الراداري (PPI Scope) ---
+# --- رسم دائرة الكشف الراداري (PPI Scope) فوق خلفية الخريطة الجغرافية ---
 fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=(6, 6))
 fig.patch.set_facecolor('#0f171e')
+
+if bg_img:
+    # عرض الخريطة الجغرافية كخلفية شفافة تحت الإسقاط القطبي
+    ax.imshow(bg_img, extent=[-180, 180, -90, 90], transform=ax.transData, alpha=0.35)
+
 ax.set_facecolor('#0f171e')
 
 rad_azimuths = np.radians(azimuths)
-ax.plot(rad_azimuths, max_ranges, color='#00d2d3', linewidth=2)
-ax.fill(rad_azimuths, max_ranges, color='#00d2d3', alpha=0.2)
+ax.plot(rad_azimuths, max_ranges, color='#00d2d3', linewidth=2.5, zorder=3)
+ax.fill(rad_azimuths, max_ranges, color='#00d2d3', alpha=0.25, zorder=2)
 
 shadow_indices = np.where(masked_sectors)[0]
 if len(shadow_indices) > 0:
-    ax.fill_between(rad_azimuths, 0, np.where(masked_sectors, max_ranges, 0), color='#ff4757', alpha=0.5)
+    ax.fill_between(rad_azimuths, 0, np.where(masked_sectors, max_ranges, 0), color='#ff4757', alpha=0.55, zorder=3)
 
 cursor_rad = math.radians(beam_azimuth)
-ax.plot([cursor_rad, cursor_rad], [0, cur_range], color='#ffa502', linewidth=2.5, linestyle='-')
-ax.scatter([cursor_rad], [cur_range], color='#ffffff', s=80, zorder=5)
+ax.plot([cursor_rad, cursor_rad], [0, cur_range], color='#ffa502', linewidth=3, linestyle='-', zorder=4)
+ax.scatter([cursor_rad], [cur_range], color='#ffffff', s=90, zorder=5)
 
 ax.set_theta_zero_location('N')
 ax.set_theta_direction(-1)
 ax.set_rticks([10, 20, 30, 40])
 ax.set_rlabel_position(45)
 ax.tick_params(colors='white', labelsize=8)
-ax.grid(color='#718093', linestyle='--', linewidth=0.5)
+ax.grid(color='#718093', linestyle='--', linewidth=0.5, alpha=0.7)
 
 st.pyplot(fig)
 
